@@ -1,0 +1,143 @@
+package rules
+
+import com.udea.labdrools.model.Passenger
+import com.udea.labdrools.model.Flight
+import com.udea.labdrools.model.Seat
+
+// Upgrade Gold/Platinum passengers when their flight is delayed over 60 minutes.
+// Passengers with overweight luggage are excluded by the luggage restriction rule.
+rule "UpgradeToBusinessClassForFrequentFlyersWithDelays"
+    when
+        $passenger : Passenger(
+            membershipStatus in ("Gold", "Platinum"),
+            upgradeDenied == false,
+            luggageWeightKg <= 23,
+            seatClass != "Business",
+            $flightId : flightId
+        )
+        Flight(flightId == $flightId, delayMinutes > 60)
+    then
+        modify($passenger) {
+            setSeatClass("Business")
+        }
+end
+
+// Give passengers older than 65 priority check-in.
+rule "PriorityCheckInForSeniors"
+    when
+        $passenger : Passenger(age > 65, priorityCheckIn == false)
+    then
+        modify($passenger) {
+            setPriorityCheckIn(true)
+        }
+end
+
+// Apply a 10% discount when luggage weighs less than 10 kg.
+rule "DiscountForLightLuggage"
+    when
+        $passenger : Passenger(luggageWeightKg < 10, discountPercent < 10.0)
+    then
+        modify($passenger) {
+            setDiscountPercent(10.0)
+        }
+end
+
+// Mark passengers with luggage over 23 kg as ineligible for upgrades.
+// Higher salience makes this restriction run before eligible upgrades.
+rule "DenyUpgradeForOverweightLuggage"
+    salience 20
+    when
+        $passenger : Passenger(luggageWeightKg > 23, upgradeDenied == false)
+    then
+        modify($passenger) {
+            setUpgradeDenied(true)
+        }
+end
+
+// Assign an available emergency-exit seat to an adult aged 18-40 with no specific preference.
+rule "AssignEmergencyExitSeatToYoungAdults"
+    when
+        $passenger : Passenger(
+            age >= 18,
+            age <= 40,
+            seatPreference == "Any",
+            assignedSeatNumber == null,
+            $flightId : flightId
+        )
+        $seat : Seat(
+            flightId == $flightId,
+            emergencyExit == true,
+            occupied == false,
+            $seatNumber : seatNumber
+        )
+    then
+        modify($seat) {
+            setOccupied(true)
+        }
+        modify($passenger) {
+            setAssignedSeatNumber($seatNumber)
+        }
+end
+
+// Award $200 when the passenger's flight is delayed by more than 180 minutes.
+rule "CompensationForExtremeDelays"
+    when
+        $passenger : Passenger(compensationAmount < 200.0, $flightId : flightId)
+        Flight(flightId == $flightId, delayMinutes > 180)
+    then
+        modify($passenger) {
+            setCompensationAmount(200.0)
+        }
+end
+
+// Award the 500-point bonus once to non-Basic members on flights over five hours.
+rule "ExtraLoyaltyPointsForLongFlights"
+    when
+        $passenger : Passenger(
+            membershipStatus != null,
+            membershipStatus != "",
+            membershipStatus != "Basic",
+            longFlightBonusAwarded == false,
+            $flightId : flightId
+        )
+        Flight(flightId == $flightId, durationHours > 5.0)
+    then
+        $passenger.setLoyaltyPoints($passenger.getLoyaltyPoints() + 500);
+        $passenger.setLongFlightBonusAwarded(true);
+        update($passenger);
+end
+
+// Mark luggage over 15 kg as restricted for flights shorter than two hours.
+rule "RestrictLuggageOnShortFlights"
+    when
+        $passenger : Passenger(luggageWeightKg > 15, luggageRestricted == false, $flightId : flightId)
+        Flight(flightId == $flightId, durationHours < 2.0)
+    then
+        modify($passenger) {
+            setLuggageRestricted(true)
+        }
+end
+
+// Grant VIP lounge access to Platinum members.
+rule "VipLoungeAccessForPlatinumMembers"
+    when
+        $passenger : Passenger(membershipStatus == "Platinum", vipLoungeAccess == false)
+    then
+        modify($passenger) {
+            setVipLoungeAccess(true)
+        }
+end
+
+// Assign a family-preferred seat type when traveling with children without a specific preference.
+rule "PreferentialSeatForFamilies"
+    when
+        $passenger : Passenger(
+            travelingWithChildren == true,
+            assignedSeatType == null,
+            (seatPreference == null || seatPreference == "" || seatPreference == "Any")
+        )
+    then
+        modify($passenger) {
+            setAssignedSeatType("FAMILY_PREFERRED")
+        }
+end
